@@ -1,66 +1,72 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.27;
 
-import "../src/Vault.sol";
-import "../src/VaultNFT.sol";
-import "../src/IERC20.sol";
+import "./Vault.sol"; // the vault contract that will store the ERC20 token
+import "./VaultNFT.sol"; // used to mint the NFt used to represent each vault
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 contract VaultFactory {
 
-    mapping(address => address) public vaults;
-    // Maps a token address to the vault address created for that token
+    Sky  public sky; // state variable used to store the address of the NFT contract that mints vault NFT
 
-    Sky public nft;
-    // Stores the NFT contract instance used for minting reward NFTs
+    /// @notice vault address for each ERC20 token
+    mapping(address => address) public tokenvault;
+    /// @notice tokenId representing a vault NFT for each vault address
+    mapping(address => uint256) public vaultToTokenId;
 
     constructor() {
-        // Constructor runs once when the factory is deployed
-
-        nft = new Sky();
-        // Deploys a new Sky NFT contract and saves its address
+        sky = new Sky();
     }
 
-    function deployVault(address token) public returns (address) {
-        // Deploys a vault for a specific ERC20 token
+    /// @notice create or get existing vault for a token and deposit amount
+    /// @param token ERC20 token contract address
+    /// @param user address on whose behalf the deposit is made
+    /// @param amount number of tokens to deposit (in smallest units)
+    function createVault(address token, address user, uint256 amount) external {
+        require(amount > 0, "NO_AMOUNT");
 
-        if (vaults[token] != address(0)) {
-            // Checks if a vault for this token already exists
-            return vaults[token];
-            // If it exists, return the existing vault address
+        address vault = tokenvault[token]; // checks if a vault has been created already for the token
+
+        // if the mapping returns a 0 address, it means a vault does not exist
+        if (vault == address(0)) {
+            vault = _deployVault(token);
+            tokenvault[token] = vault; // after deployment, the vault address is stored in the mapping
+            // mint NFT to the provided user and remember id
+            vaultToTokenId[vault] = sky.mint(user, vault, token, amount);
         }
 
-        bytes32 salt = keccak256(abi.encode(token));
-        // Creates a deterministic salt value based on the token address
+        IERC20(token).transferFrom(msg.sender, vault, amount); // The ERC20 tokens are transferred from the user to the vault contract.
+        TokenVault(vault).deposit(amount, msg.sender); // the vault contract records the deposit internally so it can track user balances.
 
-        Vault vault = new Vault{salt: salt}(token, address(this));
-        // Deploys a new Vault contract using CREATE2 with the salt
-        // Passes the token address and this factory's address to the constructor
-
-        vaults[token] = address(vault);
-        // Saves the deployed vault address in the mapping
-
-        return address(vault);
-        // Returns the address of the deployed vault
+        // update nft metadata with new total
+        _updateNFT(vault);
     }
 
-    function deposit(address token, uint256 amount) external {
-        // Allows a user to deposit tokens into the vault for a specific token
+    /// @notice deposit further tokens into an existing vault
+    function depositToVault(address token, uint256 amount) external {
+        require(amount > 0, "NO_AMOUNT");
+        address vault = tokenvault[token];
+        require(vault != address(0), "NO_VAULT");
 
-        address vault = deployVault(token);
-        // Gets the vault for this token or deploys a new one if it doesn't exist
+        IERC20(token).transferFrom(msg.sender, vault, amount);
+        TokenVault(vault).deposit(amount, msg.sender);
+        _updateNFT(vault);
+    }
 
-        // transfer tokens to vault
-        bool success = IERC20(token).transferFrom(msg.sender, vault, amount);
-        // Transfers tokens from the user directly to the vault
 
-        require(success, "Transfer failed");
-        // Reverts if the token transfer fails
 
-        // FIX: deposit only accepts amount
-        Vault(vault).deposit(amount);
-        // Calls the deposit function in the vault contract
+// Add this function to update NFT metadata (e.g., for SVG URI)
 
-        // FIX: mint() takes no arguments
-        nft.mint();
-        // Mints an NFT reward for the user after depositing
+    function _updateNFT(address vault) internal {
+        uint256 id = vaultToTokenId[vault];
+        uint256 total = TokenVault(vault).totaldeposits();
+        sky.updateAmount(id, total);
+    }
+
+    function _deployVault(address token) internal returns(address vault) {
+        bytes32 salt = bytes32(uint256(uint160(token)));
+        vault = address(
+            new TokenVault{salt: salt}(IERC20(token))
+        );
     }
 }

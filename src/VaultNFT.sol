@@ -5,21 +5,50 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Base64.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 contract Sky is ERC721, ERC721URIStorage {
     
      using Strings for uint256;
     // Allows uint256 variables to use the Strings library functions
 
+    address public factory;
+
     uint256 private _nextTokenId;
     // Stores the next token ID that will be minted
+
+     mapping(uint256 => address) public vaultOf;
+    mapping(uint256 => address) public tokenOf;
+     mapping(uint256 => uint256) public amountOf;
 
   
     mapping(uint256 => uint256) public tokenIdToLevels;
     // Maps each token ID to a level value
 
-    constructor() ERC721("Sky", "SKY") {}
+    constructor() ERC721("Sky", "SKY") {
+        factory = msg.sender;
+    }
     // Constructor that sets the NFT name ("Sky") and symbol ("SKY")
+
+    function mint(address to, address vault, address token, uint256 amount) external returns(uint256) {
+        require(msg.sender == factory, "ONLY_FACTORY");
+        _nextTokenId++;
+        uint256 newItemId = _nextTokenId;
+        vaultOf[newItemId] = vault;
+        tokenOf[newItemId] = token;
+        amountOf[newItemId] = amount;
+
+        _safeMint(to, newItemId);
+        _setTokenURI(newItemId, getTokenURI(newItemId));
+        return newItemId;
+    }
+
+    /// @notice update stored amount after additional deposits
+    function updateAmount(uint256 tokenId, uint256 amount) external {
+        require(msg.sender == factory, "ONLY_FACTORY");
+        amountOf[tokenId] = amount;
+        _setTokenURI(tokenId, getTokenURI(tokenId));
+    }
 
     // Required overrides
     function tokenURI(uint256 tokenId)
@@ -47,17 +76,20 @@ contract Sky is ERC721, ERC721URIStorage {
     // Generate SVG image
     function generateCharacter(uint256 tokenId) public view returns(string memory){
         // Generates the SVG image for the NFT
-
+     address token = tokenOf[tokenId];
+        uint256 amount = amountOf[tokenId];
+        string memory symbol = IERC20Metadata(token).symbol();
         bytes memory svg = abi.encodePacked(
             // Combines multiple pieces of text into a single byte array
 
             '<svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet" viewBox="0 0 350 350">',
             '<style>.base { fill: white; font-family: serif; font-size: 14px; }</style>',
-            '<rect width="100%" height="100%" fill="red" />',
-            '<text x="50%" y="40%" class="base" dominant-baseline="middle" text-anchor="middle">Sky</text>',
-            '<text x="50%" y="50%" class="base" dominant-baseline="middle" text-anchor="middle">Level: ',
+            '<rect width="100%" height="100%" fill="purple" />',
+            '<text x="50%" y="40%" class="base" dominant-baseline="middle" text-anchor="middle">VaultNFT</text>',
+            '<text x="50%" y="45%" class="base" dominant-baseline="middle" text-anchor="middle">Token: ', symbol, '</text>',
+            '<text x="50%" y="50%" class="base" dominant-baseline="middle" text-anchor="middle">Amount:',
 
-            Strings.toString(tokenIdToLevels[tokenId]),
+            Strings.toString(amount),
             // Converts the NFT level number to a string
 
             '</text>',
